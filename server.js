@@ -150,6 +150,52 @@ app.post('/api/rooms', authMiddleware, async (req, res) => {
   });
 });
 
+// Вход в комнату
+app.post('/api/rooms/:id/join', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Комната не найдена' });
+
+  const state = JSON.parse(row.game_state);
+  const alreadyIn = state.players.some((p) => p.id === req.user.id);
+
+  if (!alreadyIn) {
+    if (row.status !== 'WAITING') {
+      return res.status(400).json({ error: 'Игра уже началась' });
+    }
+    if (state.players.length >= 12) {
+      return res.status(400).json({ error: 'Комната заполнена (максимум 12 игроков)' });
+    }
+    state.players.push({ id: req.user.id, username: req.user.username, role: null, isAlive: true });
+    await run('UPDATE rooms SET game_state = ? WHERE id = ?', [JSON.stringify(state), row.id]);
+  }
+
+  res.json({
+    room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: row.status, ...state }
+  });
+});
+
+// Выход из комнаты
+app.post('/api/rooms/:id/leave', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.json({ ok: true });
+
+  const state = JSON.parse(row.game_state);
+  state.players = state.players.filter((p) => p.id !== req.user.id);
+
+  if (state.players.length === 0) {
+    await run('DELETE FROM rooms WHERE id = ?', [row.id]);
+  } else {
+    const newHostId = row.host_id === req.user.id ? state.players[0].id : row.host_id;
+    await run('UPDATE rooms SET host_id = ?, game_state = ? WHERE id = ?', [
+      newHostId,
+      JSON.stringify(state),
+      row.id
+    ]);
+  }
+
+  res.json({ ok: true });
+});
+
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`Сервер Mafia запущен на http://localhost:${PORT}`);
