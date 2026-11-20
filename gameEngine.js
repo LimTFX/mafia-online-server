@@ -39,6 +39,20 @@ function assignRoles(players) {
   }));
 }
 
+function checkWinCondition(players) {
+  const alive = players.filter((p) => p.isAlive);
+  const mafiaCount = alive.filter((p) => p.role === 'MAFIA').length;
+  const townCount = alive.length - mafiaCount;
+
+  if (mafiaCount === 0) {
+    return 'Победа мирных жителей! Вся мафия обезврежена.';
+  }
+  if (mafiaCount >= townCount) {
+    return 'Победа Мафии! Город полностью захвачен.';
+  }
+  return null;
+}
+
 function startGame(state) {
   const updatedPlayers = assignRoles(state.players);
   return {
@@ -57,7 +71,7 @@ function startGame(state) {
 function resolveNight(state) {
   const { DOCTOR: healedId, MAFIA: killedId, DETECTIVE: checkedId } = state.nightActions;
   let announcement = 'Наступило утро. ';
-  let updatedPlayers = [...state.players];
+  let updatedPlayers = state.players.map((p) => ({ ...p }));
 
   if (killedId && killedId !== healedId) {
     const victim = updatedPlayers.find((p) => p.id === killedId);
@@ -83,6 +97,20 @@ function resolveNight(state) {
     }
   }
 
+  const winMessage = checkWinCondition(updatedPlayers);
+  if (winMessage) {
+    return {
+      ...state,
+      phase: 'GAME_OVER',
+      phaseEndsAt: null,
+      lastAnnouncement: `${announcement} ${winMessage}`,
+      players: updatedPlayers,
+      nightActions: {},
+      dayVotes: {},
+      detectiveReport
+    };
+  }
+
   return {
     ...state,
     phase: 'DAY_VOTING',
@@ -95,4 +123,40 @@ function resolveNight(state) {
   };
 }
 
-module.exports = { NIGHT_DURATION_MS, DAY_DURATION_MS, NIGHT_SEQUENCE, startGame, resolveNight };
+function advancePhaseIfExpired(state) {
+  if (!state.phaseEndsAt || Date.now() < state.phaseEndsAt) {
+    return { state, changed: false };
+  }
+
+  const nightIdx = NIGHT_SEQUENCE.indexOf(state.phase);
+  if (nightIdx !== -1) {
+    if (nightIdx < NIGHT_SEQUENCE.length - 1) {
+      const nextPhase = NIGHT_SEQUENCE[nightIdx + 1];
+      return {
+        changed: true,
+        state: {
+          ...state,
+          phase: nextPhase,
+          phaseEndsAt: Date.now() + NIGHT_DURATION_MS,
+          lastAnnouncement: ''
+        }
+      };
+    } else {
+      return {
+        changed: true,
+        state: resolveNight(state)
+      };
+    }
+  }
+
+  return { state, changed: false };
+}
+
+module.exports = {
+  NIGHT_DURATION_MS, 
+  DAY_DURATION_MS, 
+  NIGHT_SEQUENCE, 
+  startGame, 
+  resolveNight, 
+  advancePhaseIfExpired
+};
