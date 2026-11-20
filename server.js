@@ -3,6 +3,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { run, get, all, initDb } = require('./db');
 const { resourceLimits } = require('worker_threads');
+const { state } = require('../mafia-online-client/js/state');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,10 @@ function hashPassword(password) {
 
 function generateToken() {
   return crypto.randomBytes(24).toString('hex');
+}
+
+function generateRoomCode() {
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 async function authMiddleware(req, res, next) {
@@ -82,7 +87,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Проверка сессии
-app.post('/api/me', authMiddleware, async (req, res) => {
+app.get('/api/me', authMiddleware, async (req, res) => {
   const rooms = await all('SELECT * FROM rooms');
   let activeRoom = null;
 
@@ -95,6 +100,54 @@ app.post('/api/me', authMiddleware, async (req, res) => {
   }
 
   res.json({ user: req.user, activeRoom });
+});
+
+// Список комнат
+app.get('/api/rooms', authMiddleware, async (req, res) => {
+  const rows = await all('SELECT * FROM rooms ORDER BY id DESC');
+  const rooms = rows.map((r) => {
+    const state = JSON.parse(r.game_state);
+    return {
+      id: r.id,
+      name: r.name,
+      code: r.code,
+      status: r.status,
+      playerCount: state.players.length
+    };
+  });
+
+  res.json({ rooms });
+});
+
+// Создание комнаты
+app.post('/api/rooms', authMiddleware, async (req, res) => {
+  const name = (req.body.name || '').trim() || `Комната ${req.user.username}`;
+  const code = generateRoomCode();
+  const initialState = {
+    phase: 'WAITING',
+    dayNumber: 0,
+    phaseEndsAt: null,
+    lastAnnouncement: '',
+    players: [{ id: req.user.id, username: req.user.username, role: null, isAlive: true }],
+    nightActions: {},
+    dayVotes: {}
+  };
+
+  const result = await run(
+    'INSERT INTO rooms (name, code, host_id, status, game_state) VALUES (?, ?, ?, ?, ?)',
+    [name, code, req.user.id, 'WAITING', JSON.stringify(initialState)]
+  );
+
+  res.json({
+    rooms: {
+      id: result.id,
+      name,
+      code,
+      hostId: req.user.id,
+      status: 'WAITING',
+      ...initialState
+    }
+  });
 });
 
 initDb().then(() => {
