@@ -39,4 +39,60 @@ function assignRoles(players) {
   }));
 }
 
-module.exports = { NIGHT_DURATION_MS, DAY_DURATION_MS, NIGHT_SEQUENCE };
+function startGame(state) {
+  const updatedPlayers = assignRoles(state.players);
+  return {
+    ...state,
+    phase: 'NIGHT_MISTRESS',
+    dayNumber: 1,
+    phaseEndsAt: Date.now() + NIGHT_DURATION_MS,
+    lastAnnouncement: 'Город засыпает. Просыпается Любовница и делает свой выбор...',
+    players: updatedPlayers,
+    nightActions: {},
+    dayVotes: {},
+    detectiveReport: null
+  };
+}
+
+function resolveNight(state) {
+  const { DOCTOR: healedId, MAFIA: killedId, DETECTIVE: checkedId } = state.nightActions;
+  let announcement = 'Наступило утро. ';
+  let updatedPlayers = [...state.players];
+
+  if (killedId && killedId !== healedId) {
+    const victim = updatedPlayers.find((p) => p.id === killedId);
+    if (victim) {
+      victim.isAlive = false;
+      announcement += `Этой ночью был убит игрок ${victim.username}.`;
+    }
+  } else if (killedId && killedId === healedId) {
+    announcement += 'Мафия выходила на охоту, но Доктор спас жертву. Никто не погиб.';
+  } else {
+    announcement += 'Ночь прошла спокойно, никто не пострадал.';
+  }
+
+  let detectiveReport = null;
+  if (checkedId) {
+    const target = updatedPlayers.find((p) => p.id === checkedId);
+    if (target) {
+      detectiveReport = {
+        targetId: target.id,
+        targetName: target.username,
+        isMafia: target.role === 'MAFIA'
+      };
+    }
+  }
+
+  return {
+    ...state,
+    phase: 'DAY_VOTING',
+    phaseEndsAt: Date.now() + DAY_DURATION_MS,
+    lastAnnouncement: announcement,
+    players: updatedPlayers,
+    nightActions: {},
+    dayVotes: {},
+    detectiveReport
+  };
+}
+
+module.exports = { NIGHT_DURATION_MS, DAY_DURATION_MS, NIGHT_SEQUENCE, startGame, resolveNight };
