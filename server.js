@@ -49,12 +49,35 @@ app.post('/api/auth/register', async (req, res) => {
       const token = generateToken();
       const result = await run(
         'INSERT INTO users (username, password_hash, token) VALUES (?, ?, ?)',
-        [username. hashPassword(password), token]
+        [username, hashPassword(password), token]
       );
 
       res.json({ token, user: { id: result.id, username } });
     } catch (err) {
       res.status(500).json({ error: 'Ошибка сервера при регистрации' });
+    }
+});
+
+// Авторизация
+app.post('/api/auth/login', async (req, res) => {
+    try {
+      const username = (req.body.username || '').trim();
+      const password = req.body.password || '';
+      const user = await get(
+        'SELECT id, username, password_hash FROM users WHERE username = ?', 
+        [username]
+      );
+
+      if (!user || user.password_hash !== hashPassword(password)) {
+        return res.status(401).json({ error: 'Неверный логин или пароль' });
+      }
+
+      const token = generateToken();
+      await run('UPDATE users SET token = ? WHERE id = ?',[token, user.id]);
+
+      res.json({ token, user: { id: user.id, username: user.username } });
+    } catch (err) {
+      res.status(500).json({ error: 'Ошибка сервера при авторизации' });
     }
 });
 
