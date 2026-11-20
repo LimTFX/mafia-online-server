@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const { run, get, all, initDb } = require('./db');
+const { resourceLimits } = require('worker_threads');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,6 +29,34 @@ async function authMiddleware(req, res, next) {
   req.user = user;
   next();
 }
+
+//Регистрация
+app.post('/api/auth/register', async (req, res) => {
+    try {
+      const username = (req.body.username || '').trim();
+      const password = req.body.password || '';
+      if (username.length < 2) {
+        return res.status(400).json({ error: 'Слишком короткий логин'});
+      } else if (password.length < 3) {
+        return res.status(400).json({ error: 'Слишком короткий пароль'});
+      }
+
+      const existing = await get('SELECT id FROM users WHERE username = ?', [username]);
+      if (existing) {
+        return res.status(400).json({ error: 'Это имя уже занято' });
+      }
+
+      const token = generateToken();
+      const result = await run(
+        'INSERT INTO users (username, password_hash, token) VALUES (?, ?, ?)',
+        [username. hashPassword(password), token]
+      );
+
+      res.json({ token, user: { id: result.id, username } });
+    } catch (err) {
+      res.status(500).json({ error: 'Ошибка сервера при регистрации' });
+    }
+});
 
 initDb().then(() => {
   app.listen(PORT, () => {
