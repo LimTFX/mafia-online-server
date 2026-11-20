@@ -40,6 +40,17 @@ async function initDb() {
       token TEXT
     )
   `);
+
+  await run (`
+    CREATE TABLE IF NOT EXISTS rooms (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      code TEXT UNIQUE NOT NULL,
+      host_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'WAITING',
+      game_state TEXT NOT NULL
+    )  
+  `);
 }
 
 module.exports = { db, run, get, all, initDb };
