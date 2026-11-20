@@ -196,6 +196,17 @@ app.post('/api/rooms/:id/leave', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Узнаём состояние комнаты
+app.get('/api/rooms/:id', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Комната закрыта' });
+
+  const state = JSON.parse(row.game_state);
+  res.json({
+    room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: row.status, ...state }
+  });
+});
+
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`Сервер Mafia запущен на http://localhost:${PORT}`);
