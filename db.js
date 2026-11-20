@@ -31,4 +31,15 @@ function all(sql, params = []) {
   });
 }
 
-module.exports = { db, run, get, all };
+async function initDb() {
+  await run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      token TEXT
+    )
+  `);
+}
+
+module.exports = { db, run, get, all, initDb };
