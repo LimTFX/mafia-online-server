@@ -179,18 +179,33 @@ app.post('/api/rooms/:id/leave', authMiddleware, async (req, res) => {
   if (!row) return res.json({ ok: true });
 
   const state = JSON.parse(row.game_state);
+  const leavingPlayer = state.players.find((p) => p.id === req.user.id);
   state.players = state.players.filter((p) => p.id !== req.user.id);
 
   if (state.players.length === 0) {
     await run('DELETE FROM rooms WHERE id = ?', [row.id]);
-  } else {
-    const newHostId = row.host_id === req.user.id ? state.players[0].id : row.host_id;
-    await run('UPDATE rooms SET host_id = ?, game_state = ? WHERE id = ?', [
-      newHostId,
-      JSON.stringify(state),
-      row.id
-    ]);
+    return res.json({ ok: true });
   }
+
+  let newStatus = row.status;
+  if (row.status === 'PLAYING' && leavingPlayer) {
+    state.lastAnnouncement = `Игрок ${leavingPlayer.username} покинул игру.`;
+    const winMessage = checkWinCondition(state.players);
+    if (winMessage) {
+      state.phase = 'GAME_OVER';
+      state.phaseEndsAt = null;
+      state.lastAnnouncement += ` ${winMessage}`;
+      newStatus = 'FINISHED';
+    }
+  }
+
+  const newHostId = row.host_id === req.user.id ? state.players[0].id : row.host_id;
+  await run('UPDATE rooms SET host_id = ?, game_state = ? WHERE id = ?', [
+    newHostId,
+    newStatus,
+    JSON.stringify(state),
+    row.id
+  ]);
 
   res.json({ ok: true });
 });
@@ -240,6 +255,28 @@ app.post('/api/rooms/:id/start', authMiddleware, async (req, res) => {
 
   res.json({
     room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: 'PLAYING', ...state }
+  });
+});
+
+// Перезапуск игры после завершения (только хост)
+app.post('/api/rooms/:id/restart', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Комната не найдена' });
+  if (row.host_id !== req.user.id) {
+    return res.status(403).json({ error: 'Только создатель может перезапустить игру' });
+  }
+
+  let state = JSON.parse(row.game_state);
+  state = resetRoomToWaiting(state);
+
+  await run('UPDATE rooms SET status = ?, game_state = ? WHERE id = ?', [
+    'WAITING',
+    JSON.stringify(state),
+    row.id
+  ]);
+
+  res.json({
+    room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: 'WAITING', ...state }
   });
 });
 

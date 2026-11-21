@@ -302,10 +302,30 @@ function registerAction(state, userId, targetId) {
   return state;
 }
 
+function resetRoomToWaiting(state) {
+  return {
+    ...state,
+    phase: 'WAITING',
+    dayNumber: 0,
+    phaseEndsAt: null,
+    lastAnnouncement: '',
+    players: state.players.map((p) => ({
+      id: p.id,
+      username: p.username,
+      role: null,
+      isAlive: true
+    })),
+    nightActions: {},
+    dayVotes: {},
+    detectiveReport: null
+  };
+}
+
 module.exports = { 
   isMafiaTeam, 
   checkWinCondition, 
   startGame, 
   advancePhaseIfExpired, 
-  registerAction 
+  registerAction,
+  resetRoomToWaiting
 };
