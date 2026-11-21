@@ -2,11 +2,11 @@ const NIGHT_DURATION_MS = 45 * 1000; //Время для каджой ночно
 const DAY_DURATION_MS = 90 * 1000; //Время на девное обсуждение и голосование
 //Позже можно добавить возможность выставлять время самому хосту комнаты
 
-const NIGHT_SEQUENCE = [
-  'NIGHT_MISTRESS',
-  'NIGHT_DOCTOR',
-  'NIGHT_MAFIA',
-  'NIGHT_DETECTIVE'
+const NIGHT_ROLES_ORDER = [
+  { phase: 'NIGHT_MISTRESS', roles: ['MISTRESS'] },
+  { phase: 'NIGHT_DOCTOR', roles: ['DOCTOR'] },
+  { phase: 'NIGHT_MAFIA', roles: ['MAFIA_BOSS', 'MAFIA'] },
+  { phase: 'NIGHT_DETECTIVE', roles: ['DETECTIVE'] }
 ];
 
 function shuffle(array) {
@@ -20,11 +20,11 @@ function shuffle(array) {
 
 function assignRoles(players) {
   const count = players.length;
-  const rolesPool = ['MAFIA', 'DOCTOR', 'DETECTIVE', 'MISTRESS'];
+  const rolesPool = ['MAFIA', 'DOCTOR', 'DETECTIVE'];
 
-  //Если игроков больше 7, добавляем вторую мафию
-  if (count >= 7) {
-    rolesPool.push('MAFIA');
+  //Если игроков больше 8, добавляем вторую мафию
+  if (count >= 8) {
+    rolesPool.push('MAFIA_BOSS', 'MISTRESS');
   }
 
   while (rolesPool.length < count) {
@@ -39,9 +39,30 @@ function assignRoles(players) {
   }));
 }
 
+function getNextNightPhase(players, startFromIndex = 0) {
+  for (let i = startFromIndex; i < NIGHT_ROLES_ORDER.length; i++) {
+    const step = NIGHT_ROLES_ORDER[i];
+    const hasAliveActor = players.some((p) => p.isAlive && step.roles.includes(p.role));
+    if (hasAliveActor) {
+      return step.phase;
+    }
+  }
+  return null;
+}
+
+function isMafiaTeam(role) {
+  return role === 'MAFIA_BOSS' || role === 'MAFIA';
+}
+
+function getActiveMafiaShooter(players) {
+  const boss = players.find((p) => p.isAlive && p.role === 'MAFIA_BOSS');
+  if (boss) return boss;
+  return players.find((p) => p.isAlive && p.role === 'MAFIA') || null;
+}
+
 function checkWinCondition(players) {
   const alive = players.filter((p) => p.isAlive);
-  const mafiaCount = alive.filter((p) => p.role === 'MAFIA').length;
+  const mafiaCount = alive.filter((p) => isMafiaTeam(p.role)).length;
   const townCount = alive.length - mafiaCount;
 
   if (mafiaCount === 0) {
@@ -55,12 +76,14 @@ function checkWinCondition(players) {
 
 function startGame(state) {
   const updatedPlayers = assignRoles(state.players);
+  const firstPhase = getNextNightPhase(updatedPlayers, 0) || 'DAY_VOTING';
+
   return {
     ...state,
-    phase: 'NIGHT_MISTRESS',
+    phase: firstPhase,
     dayNumber: 1,
     phaseEndsAt: Date.now() + NIGHT_DURATION_MS,
-    lastAnnouncement: 'Город засыпает. Просыпается Любовница и делает свой выбор...',
+    lastAnnouncement: 'Город засыпает. Начинается первая ночь...',
     players: updatedPlayers,
     nightActions: {},
     dayVotes: {},
@@ -69,31 +92,68 @@ function startGame(state) {
 }
 
 function resolveNight(state) {
-  const { DOCTOR: healedId, MAFIA: killedId, DETECTIVE: checkedId } = state.nightActions;
-  let announcement = 'Наступило утро. ';
-  let updatedPlayers = state.players.map((p) => ({ ...p }));
+  const {
+    MISTRESS: mistressTargetId,
+    DOCTOR: healedId,
+    MAFIA: killedId,
+    DETECTIVE: checkedId
+  } = state.nightActions;
 
-  if (killedId && killedId !== healedId) {
-    const victim = updatedPlayers.find((p) => p.id === killedId);
+  let updatedPlayers = state.players.map((p) => ({ ...p }));
+  const doctor = updatedPlayers.find((p) => p.role === 'DOCTOR' && p.isAlive);
+  const detective = updatedPlayers.find((p) => p.role === 'DETECTIVE' && p.isAlive);
+  const shooter = getActiveMafiaShooter(updatedPlayers);
+
+  // Любовница блокирует способность своей цели на эту ночь
+  const isDoctorBlocked = doctor && mistressTargetId === doctor.id;
+  const isDetectiveBlocked = detective && mistressTargetId === detective.id;
+  const isMafiaBlocked = shooter && mistressTargetId === shooter.id;
+
+  const effectiveHealedId = isDoctorBlocked ? null : healedId;
+  const effectiveKilledId = isMafiaBlocked ? null : killedId;
+  const effectiveCheckedId = isDetectiveBlocked ? null : checkedId;
+
+  // Иммунитет от Любовницы: если Мафия стреляла в того, у кого была Любовница, жертва выживает
+  const savedByMistress = effectiveKilledId && effectiveKilledId === mistressTargetId;
+  const savedByDoctor = effectiveKilledId && effectiveKilledId === effectiveHealedId;
+
+  let announcement = 'Наступило утро. ';
+  if (mistressTargetId) {
+    const visited = updatedPlayers.find((p) => p.id === mistressTargetId);
+    if (visited) {
+      announcement += `Любовница провела ночь у игрока ${visited.username}. `;
+    }
+  }
+
+  if (effectiveKilledId && !savedByMistress && !savedByDoctor) {
+    const victim = updatedPlayers.find((p) => p.id === effectiveKilledId);
     if (victim) {
       victim.isAlive = false;
       announcement += `Этой ночью был убит игрок ${victim.username}.`;
     }
-  } else if (killedId && killedId === healedId) {
-    announcement += 'Мафия выходила на охоту, но Доктор спас жертву. Никто не погиб.';
+  } else if (savedByMistress) {
+    announcement += 'Мафия пыталась совершить покушение, но у цели было алиби от Любовницы! Никто не погиб.';
+  } else if (savedByDoctor) {
+    announcement += 'Мафия выходила на охоту, но Доктор вовремя спас жертву. Никто не погиб.';
   } else {
     announcement += 'Ночь прошла спокойно, никто не пострадал.';
   }
 
   let detectiveReport = null;
-  if (checkedId) {
-    const target = updatedPlayers.find((p) => p.id === checkedId);
-    if (target) {
+  if (detective) {
+    if (isDetectiveBlocked) {
       detectiveReport = {
-        targetId: target.id,
-        targetName: target.username,
-        isMafia: target.role === 'MAFIA'
+        detectiveId: detective.id,
+        message: 'Вас отвлекла Любовница. Вы не смогли провести проверку этой ночью.'
       };
+    } else if (effectiveCheckedId) {
+      const target = updatedPlayers.find((p) => p.id === effectiveCheckedId);
+      if (target) {
+        detectiveReport = {
+          detectiveId: detective.id,
+          message: `Результат проверки: игрок ${target.username} — ${isMafiaTeam(target.role) ? 'МАФИЯ!' : 'не мафия.'}`
+        };
+      }
     }
   }
 
@@ -164,16 +224,18 @@ function resolveDay(state) {
       phaseEndsAt: null,
       lastAnnouncement: `${announcement}${winMessage}`,
       players: updatedPlayers,
-      dayVotes: {}
+      dayVotes: {},
+      detectiveReport: null
     };
   }
 
+  const nextNightPhase = getNextNightPhase(updatedPlayers, 0) || 'DAY_VOTING';
   return {
     ...state,
-    phase: 'NIGHT_MISTRESS',
+    phase: nextNightPhase,
     dayNumber: (state.dayNumber || 1) + 1,
     phaseEndsAt: Date.now() + NIGHT_DURATION_MS,
-    lastAnnouncement: `${announcement}Наступает ночь. Просыпается Любовница...`,
+    lastAnnouncement: `${announcement}Наступает ночь.`,
     players: updatedPlayers,
     nightActions: {},
     dayVotes: {},
@@ -186,10 +248,10 @@ function advancePhaseIfExpired(state) {
     return { state, changed: false };
   }
 
-  const nightIdx = NIGHT_SEQUENCE.indexOf(state.phase);
-  if (nightIdx !== -1) {
-    if (nightIdx < NIGHT_SEQUENCE.length - 1) {
-      const nextPhase = NIGHT_SEQUENCE[nightIdx + 1];
+  const currentIdx = NIGHT_ROLES_ORDER.findIndex((step) => step.phase === state.phase);
+  if (currentIdx !== -1) {
+    const nextPhase = getNextNightPhase(state.players, currentIdx + 1);
+    if (nextPhase) {
       return {
         changed: true,
         state: {
@@ -200,7 +262,6 @@ function advancePhaseIfExpired(state) {
         }
       };
     }
-
     return { changed: true, state: resolveNight(state) };
   }
 
@@ -218,19 +279,33 @@ function registerAction(state, userId, targetId) {
   const target = state.players.find((p) => p.id === targetId && p.isAlive);
   if (!target) return state;
 
+  // Только Доктор может выбирать самого себя
+  if (state.phase !== 'NIGHT_DOCTOR' && userId === targetId) {
+    return state;
+  }
+
   if (state.phase === 'NIGHT_MISTRESS' && actor.role === 'MISTRESS') {
     state.nightActions.MISTRESS = targetId;
   } else if (state.phase === 'NIGHT_DOCTOR' && actor.role === 'DOCTOR') {
     state.nightActions.DOCTOR = targetId;
-  } else if (state.phase === 'NIGHT_MAFIA' && actor.role === 'MAFIA') {
-    state.nightActions.MAFIA = targetId;
+  } else if (state.phase === 'NIGHT_MAFIA') {
+    const shooter = getActiveMafiaShooter(state.players);
+    if (shooter && shooter.id === userId && !isMafiaTeam(target.role)) {
+      state.nightActions.MAFIA = targetId;
+    }
   } else if (state.phase === 'NIGHT_DETECTIVE' && actor.role === 'DETECTIVE') {
     state.nightActions.DETECTIVE = targetId;
   } else if (state.phase === 'DAY_VOTING') {
-   state.dayVotes[userId] = targetId;
+    state.dayVotes[userId] = targetId;
   }
 
   return state;
 }
 
-module.exports = { startGame, advancePhaseIfExpired, registerAction };
+module.exports = { 
+  isMafiaTeam, 
+  checkWinCondition, 
+  startGame, 
+  advancePhaseIfExpired, 
+  registerAction 
+};
