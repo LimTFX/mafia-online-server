@@ -2,7 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const { run, get, all, initDb } = require('./db');
-const { startGame, advancePhaseIfExpired, registerAction } = require('./gameEngine');
+const { 
+  startGame, 
+  resetRoomToWaiting, 
+  checkWinCondition, 
+  advancePhaseIfExpired, 
+  registerAction 
+} = require('./gameEngine');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -295,7 +301,7 @@ app.post('/api/rooms/:id/action', authMiddleware, async (req, res) => {
 });
 
 initDb().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Сервер Mafia запущен на http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Сервер Mafia запущен на http://0.0.0.0:${PORT}`);
   });
 });
