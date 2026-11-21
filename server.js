@@ -200,7 +200,7 @@ app.post('/api/rooms/:id/leave', authMiddleware, async (req, res) => {
   }
 
   const newHostId = row.host_id === req.user.id ? state.players[0].id : row.host_id;
-  await run('UPDATE rooms SET host_id = ?, game_state = ? WHERE id = ?', [
+  await run('UPDATE rooms SET host_id = ?, status = ?, game_state = ? WHERE id = ?', [
     newHostId,
     newStatus,
     JSON.stringify(state),
