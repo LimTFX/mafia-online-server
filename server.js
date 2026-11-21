@@ -2,8 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const { run, get, all, initDb } = require('./db');
-const { resourceLimits } = require('worker_threads');
-const { state } = require('../mafia-online-client/js/state');
+const { startGame, advancePhaseIfExpired, registerAction } = require('./gameEngine');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -201,7 +200,58 @@ app.get('/api/rooms/:id', authMiddleware, async (req, res) => {
   const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Комната закрыта' });
 
-  const state = JSON.parse(row.game_state);
+  let state = JSON.parse(row.game_state);
+  const check = advancePhaseIfExpired(state);
+  if (check.changed) {
+    state = check.state;
+    const newStatus = state.phase === 'GAME_OVER' ? 'FINISHED' : row.status;
+    await run('UPDATE rooms SET status = ?, game_state = ? WHERE id = ?', [
+      newStatus,
+      JSON.stringify(state),
+      row.id
+    ]);
+    row.status = newStatus;
+  }
+
+  res.json({
+    room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: row.status, ...state }
+  });
+});
+
+// Старт игры (только хост)
+app.post('/api/rooms/:id/start', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Комната не найдена' });
+  if (row.host_id !== req.user.id) {
+    return res.status(403).json({ error: 'Только создатель может начать игру' });
+  }
+
+  let state = JSON.parse(row.game_state);
+  if (state.players.length < 4) {
+    return res.status(400).json({ error: 'Нужно минимум 4 игрока' });
+  }
+
+  state = startGame(state);
+  await run('UPDATE rooms SET status = ?, game_state = ? WHERE id = ?', [
+    'PLAYING',
+    JSON.stringify(state),
+    row.id
+  ]);
+
+  res.json({
+    room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: 'PLAYING', ...state }
+  });
+});
+
+// Отправка ночного хода или дневного голоса
+app.post('/api/rooms/:id/action', authMiddleware, async (req, res) => {
+  const row = await get('SELECT * FROM rooms WHERE id = ?', [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Комната не найдена' });
+
+  let state = JSON.parse(row.game_state);
+  state = registerAction(state, req.user.id, Number(req.body.targetId));
+
+  await run('UPDATE rooms SET game_state = ? WHERE id = ?', [JSON.stringify(state), row.id]);
   res.json({
     room: { id: row.id, name: row.name, code: row.code, hostId: row.host_id, status: row.status, ...state }
   });

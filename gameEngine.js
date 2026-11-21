@@ -199,9 +199,9 @@ function advancePhaseIfExpired(state) {
           lastAnnouncement: ''
         }
       };
-    } else {
-      return { changed: true, state: resolveNight(state) };
     }
+
+    return { changed: true, state: resolveNight(state) };
   }
 
   if (state.phase === 'DAY_VOTING') {
@@ -211,12 +211,26 @@ function advancePhaseIfExpired(state) {
   return { state, changed: false };
 }
 
-module.exports = {
-  NIGHT_DURATION_MS, 
-  DAY_DURATION_MS, 
-  NIGHT_SEQUENCE, 
-  startGame, 
-  resolveNight, 
-  advancePhaseIfExpired,
-  resolveDay
-};
+function registerAction(state, userId, targetId) {
+  const actor = state.players.find((p) => p.id === userId && p.isAlive);
+  if (!actor) return state;
+
+  const target = state.players.find((p) => p.id === targetId && p.isAlive);
+  if (!target) return state;
+
+  if (state.phase === 'NIGHT_MISTRESS' && actor.role === 'MISTRESS') {
+    state.nightActions.MISTRESS = targetId;
+  } else if (state.phase === 'NIGHT_DOCTOR' && actor.role === 'DOCTOR') {
+    state.nightActions.DOCTOR = targetId;
+  } else if (state.phase === 'NIGHT_MAFIA' && actor.role === 'MAFIA') {
+    state.nightActions.MAFIA = targetId;
+  } else if (state.phase === 'NIGHT_DETECTIVE' && actor.role === 'DETECTIVE') {
+    state.nightActions.DETECTIVE = targetId;
+  } else if (state.phase === 'DAY_VOTING') {
+   state.dayVotes[userId] = targetId;
+  }
+
+  return state;
+}
+
+module.exports = { startGame, advancePhaseIfExpired, registerAction };
