@@ -123,6 +123,64 @@ function resolveNight(state) {
   };
 }
 
+function resolveDay(state) {
+  const tally = {};
+  Object.values(state.dayVotes).forEach((targetId) => {
+    tally[targetId] = (tally[targetId] || 0) + 1;
+  });
+
+  let maxVotes = 0;
+  let candidateId = null;
+  let isTie = false;
+
+  Object.entries(tally).forEach(([id, count]) => {
+    if (count > maxVotes) {
+      maxVotes = count;
+      candidateId = Number(id);
+      isTie = false;
+    } else if (count === maxVotes) {
+      isTie = true;
+    }
+  });
+
+  let updatedPlayers = state.players.map((p) => ({ ...p }));
+  let announcement = '';
+
+  if (candidateId && !isTie) {
+    const exiled = updatedPlayers.find((p) => p.id === candidateId);
+    if (exiled) {
+      exiled.isAlive = false;
+      announcement = `По итогам голосования город покидает ${exiled.username}. `;
+    }
+  } else {
+    announcement = 'Голоса разделились поровну, никто не был исключен. ';
+  }
+
+  const winMessage = checkWinCondition(updatedPlayers);
+  if (winMessage) {
+    return {
+      ...state,
+      phase: 'GAME_OVER',
+      phaseEndsAt: null,
+      lastAnnouncement: `${announcement}${winMessage}`,
+      players: updatedPlayers,
+      dayVotes: {}
+    };
+  }
+
+  return {
+    ...state,
+    phase: 'NIGHT_MISTRESS',
+    dayNumber: (state.dayNumber || 1) + 1,
+    phaseEndsAt: Date.now() + NIGHT_DURATION_MS,
+    lastAnnouncement: `${announcement}Наступает ночь. Просыпается Любовница...`,
+    players: updatedPlayers,
+    nightActions: {},
+    dayVotes: {},
+    detectiveReport: null
+  };
+}
+
 function advancePhaseIfExpired(state) {
   if (!state.phaseEndsAt || Date.now() < state.phaseEndsAt) {
     return { state, changed: false };
@@ -142,11 +200,12 @@ function advancePhaseIfExpired(state) {
         }
       };
     } else {
-      return {
-        changed: true,
-        state: resolveNight(state)
-      };
+      return { changed: true, state: resolveNight(state) };
     }
+  }
+
+  if (state.phase === 'DAY_VOTING') {
+    return { changed: true, state: resolveDay(state) };
   }
 
   return { state, changed: false };
@@ -158,5 +217,6 @@ module.exports = {
   NIGHT_SEQUENCE, 
   startGame, 
   resolveNight, 
-  advancePhaseIfExpired
+  advancePhaseIfExpired,
+  resolveDay
 };
